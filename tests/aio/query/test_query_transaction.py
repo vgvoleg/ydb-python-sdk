@@ -1,11 +1,45 @@
+import asyncio
+from unittest import mock
+
 import pytest
 
 import ydb
 from ydb.aio.query.transaction import QueryTxContext
+from ydb._grpc.grpcwrapper import ydb_query_public_types as _ydb_query_public
 from ydb.query.transaction import QueryTxStateEnum
 
 
 class TestAsyncQueryTransaction:
+    @pytest.mark.asyncio
+    async def test_context_manager_shields_rollback_from_cancellation(self):
+        tx = QueryTxContext(
+            driver=mock.MagicMock(),
+            session=mock.MagicMock(),
+            tx_mode=_ydb_query_public.QuerySerializableReadWrite(),
+        )
+        tx._tx_state._state = QueryTxStateEnum.BEGINED
+        tx._tx_state.tx_id = "test-tx"
+
+        rollback_started = asyncio.Event()
+        rollback_finished = asyncio.Event()
+
+        async def fake_rollback():
+            rollback_started.set()
+            await asyncio.sleep(0.05)
+            tx._tx_state._state = QueryTxStateEnum.ROLLBACKED
+            rollback_finished.set()
+
+        tx.rollback = fake_rollback
+
+        exit_task = asyncio.create_task(tx.__aexit__(None, None, None))
+        await rollback_started.wait()
+        exit_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await exit_task
+
+        await asyncio.wait_for(rollback_finished.wait(), timeout=0.5)
+        assert tx._tx_state._state == QueryTxStateEnum.ROLLBACKED
+
     @pytest.mark.asyncio
     async def test_tx_begin(self, tx: QueryTxContext):
         assert tx.tx_id is None

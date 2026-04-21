@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import (
     Optional,
@@ -67,7 +68,7 @@ class QueryTxContext(BaseQueryTxContext["AsyncDriver"]):
             # effort to avoid useless open transactions
             logger.warning("Potentially leaked tx: %s", self._tx_state.tx_id)
             try:
-                await self.rollback()
+                await asyncio.shield(self.rollback())
             except issues.Error:
                 logger.warning("Failed to rollback leaked tx: %s", self._tx_state.tx_id)
 
